@@ -1,278 +1,4 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>小红书超级洗图工厂 (在线版)</title>
-    <!-- 引入核心库 -->
-    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-
-    <style>
-        :root {
-            --primary: #ff2442; /* 小红书红 */
-            --bg: #121212;
-            --panel: #1e1e1e;
-            --text: #e0e0e0;
-            --border: #333;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            margin: 0;
-            height: 100vh;
-            display: flex;
-            overflow: hidden;
-        }
-
-        /* --- 左侧控制面板 --- */
-        .sidebar {
-            width: 360px;
-            background: var(--panel);
-            border-right: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            z-index: 10;
-            box-shadow: 2px 0 10px rgba(0,0,0,0.3);
-        }
-
-        .header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border);
-            background: #252525;
-        }
-        .header h1 { margin: 0; font-size: 18px; color: var(--primary); display: flex; align-items: center; gap: 8px; }
-
-        /* 模式切换 Tab */
-        .tabs { display: flex; background: #111; padding: 5px; margin: 15px 20px 0; border-radius: 8px; }
-        .tab-btn {
-            flex: 1; text-align: center; padding: 8px; cursor: pointer; font-size: 12px; border-radius: 6px; color: #888; transition: 0.2s;
-        }
-        .tab-btn.active { background: var(--primary); color: white; font-weight: bold; }
-
-        /* 滚动内容区 */
-        .scroll-content {
-            flex: 1; overflow-y: auto; padding: 20px;
-        }
-
-        /* 表单组件 */
-        .control-group { margin-bottom: 15px; }
-        label { display: block; font-size: 12px; color: #888; margin-bottom: 6px; }
-        input[type="text"], select, textarea {
-            width: 100%; background: #2c2c2c; border: 1px solid #444; color: white; padding: 10px; border-radius: 6px; box-sizing: border-box; font-size: 13px;
-        }
-        input[type="file"] { font-size: 12px; width: 100%; }
-        
-        /* 批量列表 */
-        .file-list {
-            border: 1px solid #444; border-radius: 6px; max-height: 200px; overflow-y: auto; margin-bottom: 10px;
-        }
-        .file-item {
-            padding: 8px; border-bottom: 1px solid #333; font-size: 12px; display: flex; justify-content: space-between; background: #222;
-        }
-        .file-item.done { color: #4caf50; }
-        .file-item.active { border-left: 3px solid var(--primary); background: #2a2a2a; }
-
-        /* 按钮 */
-        .btn-area { padding: 20px; border-top: 1px solid var(--border); background: var(--panel); }
-        .btn {
-            width: 100%; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; margin-bottom: 10px;
-        }
-        .btn-primary { background: var(--primary); color: white; }
-        .btn-primary:hover { background: #e0203a; }
-        .btn-primary:disabled { background: #555; cursor: not-allowed; }
-        .btn-outline { background: transparent; border: 1px solid #555; color: #ccc; }
-
-        /* --- 右侧预览区域 --- */
-        .preview-area {
-            flex: 1;
-            background: #000;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            background-image: radial-gradient(#333 1px, transparent 1px);
-            background-size: 20px 20px;
-        }
-
-        /* 核心卡片容器 */
-        #render-card {
-            width: 375px; /* 手机标准宽 */
-            height: 500px; /* 3:4 比例 */
-            background: #fff;
-            position: relative;
-            overflow: hidden;
-            box-shadow: 0 0 60px rgba(0,0,0,0.6);
-            display: flex;
-            flex-direction: column;
-            transition: all 0.3s ease;
-        }
-
-        /* 卡片内部元素 */
-        .bg-layer {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background-size: cover; background-position: center;
-            filter: blur(20px) brightness(0.8); z-index: 0;
-            transform: scale(1.1); /* 避免模糊白边 */
-        }
-
-        .noise-layer {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; z-index: 10; opacity: 0.05;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-        }
-
-        .content-layer {
-            position: relative; z-index: 2; height: 100%; padding: 20px;
-            display: flex; flex-direction: column;
-            background: rgba(255,255,255,0.1); /* 默认玻璃态 */
-            backdrop-filter: blur(10px);
-        }
-
-        .poster-box {
-            flex: 1; background: #000; border-radius: 8px; overflow: hidden;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.2); position: relative;
-            margin-bottom: 15px; display: flex; align-items: center; justify-content: center;
-        }
-        .poster-img { width: 100%; height: 100%; object-fit: cover; }
-        
-        .sticker { position: absolute; font-size: 28px; z-index: 5; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); }
-
-        .text-box { color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-        .card-title { font-size: 22px; font-weight: 800; margin-bottom: 8px; line-height: 1.3; }
-        .card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-        .tag { font-size: 10px; padding: 4px 8px; background: rgba(255,255,255,0.2); border-radius: 4px; border: 1px solid rgba(255,255,255,0.3); font-weight: 600; }
-
-        /* 样式变体 */
-        .style-minimal .bg-layer { display: none; }
-        .style-minimal .content-layer { background: #fff; backdrop-filter: none; }
-        .style-minimal .text-box { color: #333; text-shadow: none; }
-        .style-minimal .tag { background: #f0f0f0; border: none; color: #555; }
-
-        .style-dark .bg-layer { filter: blur(40px) brightness(0.4); }
-        .style-dark .content-layer { background: rgba(0,0,0,0.6); }
-
-        /* 工具类 */
-        .hidden { display: none !important; }
-    </style>
-</head>
-<body>
-
-    <!-- 左侧操作区 -->
-    <div class="sidebar">
-        <div class="header">
-            <h1>🔥 红薯洗图工厂 <span style="font-size:10px; background:#333; padding:2px 5px; border-radius:4px; color:#aaa">Pro</span></h1>
-        </div>
-
-        <div class="tabs">
-            <div class="tab-btn active" onclick="switchTab('single')">🎨 单图精修</div>
-            <div class="tab-btn" onclick="switchTab('batch')">⚡ 批量流水线</div>
-        </div>
-
-        <div class="scroll-content">
-            <!-- === 单图模式控件 === -->
-            <div id="single-controls">
-                <div class="control-group">
-                    <label>1. 上传图片 (海报/截图)</label>
-                    <input type="file" id="singleUpload" accept="image/*">
-                </div>
-                <div class="control-group">
-                    <label>2. 风格选择</label>
-                    <select id="styleSelect" onchange="updateStyle()">
-                        <option value="glass">磨砂玻璃 (推荐)</option>
-                        <option value="minimal">极简白底</option>
-                        <option value="dark">暗夜模式</option>
-                    </select>
-                </div>
-                <div class="control-group">
-                    <label>3. 标题内容</label>
-                    <input type="text" id="inputTitle" value="示例：宇宙嫁给我 (2025)" oninput="updateText()">
-                </div>
-                <div class="control-group">
-                    <label>4. 标签 (空格分隔)</label>
-                    <input type="text" id="inputTags" value="4K画质 韩语中字 完整版" oninput="updateText()">
-                </div>
-                <div class="control-group">
-                    <label>💡 随机化参数 (防限流)</label>
-                    <button class="btn btn-outline" onclick="randomizeView()">🎲 点击随机微调 (去重)</button>
-                    <div style="font-size:10px; color:#666; margin-top:5px">包含：噪点浓度、背景亮度、贴纸位置、边距偏移</div>
-                </div>
-            </div>
-
-            <!-- === 批量模式控件 === -->
-            <div id="batch-controls" class="hidden">
-                <div class="control-group" style="border: 2px dashed #444; padding: 15px; text-align: center; border-radius: 8px; cursor: pointer;" onclick="document.getElementById('batchUpload').click()">
-                    <input type="file" id="batchUpload" multiple accept="image/*" style="display:none">
-                    <div style="font-size:24px; margin-bottom:5px">📂</div>
-                    <div style="font-size:12px; color:#aaa">点击选择多张图片<br>或直接拖拽文件至此</div>
-                </div>
-                
-                <div class="control-group">
-                    <label>待处理队列 (<span id="queueCount">0</span>)</label>
-                    <div class="file-list" id="fileList">
-                        <div style="padding:10px; color:#555; text-align:center">暂无文件</div>
-                    </div>
-                </div>
-
-                <div class="control-group">
-                    <label>🤖 智能填充设置</label>
-                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:5px">
-                        <input type="checkbox" id="autoFill" checked style="width:auto">
-                        <span style="font-size:12px">使用文件名作为标题</span>
-                    </div>
-                    <input type="text" id="batchGlobalTags" placeholder="全局标签 (如: #分享 #推荐)" value="高清 资源分享">
-                </div>
-            </div>
-        </div>
-
-        <div class="btn-area">
-            <!-- 单图按钮 -->
-            <div id="single-btns">
-                <button class="btn btn-primary" onclick="downloadSingle()">📸 下载当前图片</button>
-            </div>
-            <!-- 批量按钮 -->
-            <div id="batch-btns" class="hidden">
-                <button class="btn btn-primary" id="startBatchBtn" onclick="startBatch()" disabled>▶️ 开始批量处理</button>
-                <button class="btn btn-outline" id="dlBatchBtn" onclick="downloadBatch()" disabled>📦 打包下载 (ZIP)</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 右侧预览区 -->
-    <div class="preview-area">
-        <div id="render-card">
-            <!-- 噪点层 (防查重核心) -->
-            <div class="noise-layer" id="noise"></div>
-            <!-- 背景层 -->
-            <div class="bg-layer" id="bg"></div>
-            
-            <div class="content-layer" id="content">
-                <div class="poster-box" id="posterBox">
-                    <img src="https://via.placeholder.com/300x400?text=POSTER" class="poster-img" id="img">
-                    <!-- 随机贴纸 -->
-                    <div class="sticker" id="sticker">✨</div>
-                </div>
-
-                <div class="text-box">
-                    <div class="card-title" id="title">示例：宇宙嫁给我 (2025)</div>
-                    <div class="card-tags" id="tags">
-                        <span class="tag">4K画质</span>
-                        <span class="tag">韩语中字</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div style="position:absolute; bottom:20px; color:#444; font-size:12px">
-            预览仅供参考，下载时将以 2倍 高清渲染
-        </div>
-    </div>
-
-    <script>
+<script>
         // === 全局状态 ===
         let mode = 'single'; // 'single' | 'batch'
         let fileQueue = [];
@@ -281,50 +7,56 @@
 
         // === 初始化 ===
         window.onload = function() {
-            // 绑定批量上传事件
             document.getElementById('batchUpload').addEventListener('change', handleBatchSelect);
-            
-            // 绑定单图上传事件
             document.getElementById('singleUpload').addEventListener('change', function(e) {
                 if(e.target.files[0]) displayImage(e.target.files[0]);
             });
         };
 
-        // === 核心逻辑：渲染单张图片 ===
+        // === 核心逻辑：加载单张图片 (Promise化) ===
         function displayImage(file, isBatch = false) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const imgSrc = e.target.result;
-                document.getElementById('img').src = imgSrc;
-                document.getElementById('bg').style.backgroundImage = `url(${imgSrc})`;
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
                 
-                // 如果是批量模式，自动填词
-                if(isBatch) {
-                    autoFillInfo(file.name);
-                }
-                // 每次加载新图，都自动随机化一次（防限流）
-                randomizeView();
-            };
-            reader.readAsDataURL(file);
+                reader.onload = function(e) {
+                    const imgSrc = e.target.result;
+                    const imgEl = document.getElementById('img');
+                    
+                    // 关键修复：确保图片元素加载完成
+                    imgEl.onload = () => {
+                        resolve(); 
+                    };
+                    imgEl.onerror = () => {
+                        reject(new Error("图片加载失败"));
+                    };
+
+                    imgEl.src = imgSrc;
+                    document.getElementById('bg').style.backgroundImage = `url(${imgSrc})`;
+                    
+                    // 立即更新文字
+                    if(isBatch) {
+                        autoFillInfo(file.name);
+                    }
+                    randomizeView();
+                };
+                
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
         }
 
         // === 核心逻辑：随机化 (防限流) ===
         function randomizeView() {
-            // 1. 随机背景亮度/模糊度
             const bright = 0.7 + Math.random() * 0.3;
             document.getElementById('bg').style.filter = `blur(20px) brightness(${bright})`;
             
-            // 2. 随机贴纸
             const sticker = document.getElementById('sticker');
             sticker.innerText = stickers[Math.floor(Math.random() * stickers.length)];
             sticker.style.top = `${5 + Math.random() * 15}%`;
             sticker.style.right = `${5 + Math.random() * 15}%`;
             sticker.style.transform = `rotate(${Math.random() * 60 - 30}deg) scale(${0.8 + Math.random() * 0.4})`;
 
-            // 3. 随机噪点浓度
             document.getElementById('noise').style.opacity = 0.04 + Math.random() * 0.06;
-
-            // 4. 随机内边距 (微调布局结构)
             document.getElementById('content').style.padding = `${18 + Math.random() * 4}px`;
         }
 
@@ -357,93 +89,117 @@
         function updateStyle() {
             const style = document.getElementById('styleSelect').value;
             const card = document.getElementById('render-card');
-            card.className = ''; // 清空类
+            card.className = ''; 
             card.classList.add(`style-${style}`);
         }
 
-        // === 批量处理逻辑 ===
+        // === 批量处理逻辑 (优化版) ===
         function handleBatchSelect(e) {
             const files = Array.from(e.target.files);
+            // 重置队列
             fileQueue = files.map((f, i) => ({ id: i, file: f, status: 'waiting' }));
+            processedBlobs = [];
             renderFileList();
-            document.getElementById('startBtn').disabled = false;
             document.getElementById('queueCount').innerText = files.length;
-            // 启用按钮
             if(files.length > 0) document.getElementById('startBatchBtn').disabled = false;
         }
 
         function renderFileList() {
             const list = document.getElementById('fileList');
-            list.innerHTML = '';
-            fileQueue.forEach(item => {
-                const div = document.createElement('div');
-                div.className = `file-item ${item.status === 'done' ? 'done' : ''}`;
-                div.id = `file-${item.id}`;
-                div.innerHTML = `<span>${item.file.name}</span><span>${getStatusIcon(item.status)}</span>`;
-                list.appendChild(div);
-            });
+            // 仅在列表为空或全部重置时重新生成，避免滚动条跳动
+            if (list.children.length !== fileQueue.length) {
+                list.innerHTML = '';
+                fileQueue.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = `file-item`;
+                    div.id = `file-${item.id}`;
+                    div.innerHTML = `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">${item.file.name}</span><span class="status-icon">${getStatusIcon(item.status)}</span>`;
+                    list.appendChild(div);
+                });
+            } else {
+                // 仅更新状态图标和类名
+                fileQueue.forEach(item => {
+                    const el = document.getElementById(`file-${item.id}`);
+                    if (el) {
+                        el.className = `file-item ${item.status === 'processing' ? 'active' : ''} ${item.status === 'done' ? 'done' : ''}`;
+                        el.querySelector('.status-icon').innerText = getStatusIcon(item.status);
+                    }
+                });
+            }
         }
 
         function getStatusIcon(status) {
             if (status === 'waiting') return '⏳';
             if (status === 'processing') return '⚙️';
             if (status === 'done') return '✅';
+            if (status === 'error') return '❌';
         }
 
         function autoFillInfo(filename) {
             if (!document.getElementById('autoFill').checked) return;
-            
-            // 简单的去后缀和去特殊字符
+            // 移除扩展名和特殊字符
             let cleanName = filename.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
             document.getElementById('title').innerText = cleanName;
             
-            // 合并全局标签
             const globalTags = document.getElementById('batchGlobalTags').value.split(' ');
             const tagHtml = globalTags.map(t => t ? `<span class="tag">${t}</span>` : '').join('');
             document.getElementById('tags').innerHTML = tagHtml;
         }
 
+        // 辅助函数：强制等待，让浏览器渲染 UI
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
         async function startBatch() {
             const btn = document.getElementById('startBatchBtn');
             btn.disabled = true;
-            btn.innerText = "正在生产中...";
-            processedBlobs = [];
-
+            btn.innerText = "处理中 (请勿关闭)...";
+            
             for (let i = 0; i < fileQueue.length; i++) {
                 const item = fileQueue[i];
-                
-                // UI 更新：高亮当前行
-                document.getElementById(`file-${item.id}`).classList.add('active');
+                if(item.status === 'done') continue; // 跳过已完成的
+
+                // 1. 更新 UI 状态
                 item.status = 'processing';
-                renderFileList(); // 更新图标
+                renderFileList();
+                // 滚动到当前项
+                document.getElementById(`file-${item.id}`).scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-                // 1. 加载图片并渲染
-                await new Promise(resolve => {
-                    displayImage(item.file, true); // true 开启自动填词
-                    // 给浏览器一点时间去渲染 DOM 图片，否则截图会是空白
-                    setTimeout(resolve, 400); 
-                });
+                try {
+                    // 2. 加载图片并等待渲染完成
+                    // 这里我们给它设置一个超时，防止某张图坏了卡死整个流程
+                    await Promise.race([
+                        displayImage(item.file, true),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error("加载超时")), 5000))
+                    ]);
 
-                // 2. 截图
-                const canvas = await html2canvas(document.getElementById('render-card'), {
-                    scale: 2, // 2倍清晰度
-                    useCORS: true,
-                    backgroundColor: null
-                });
+                    // 3. 强制暂停 300ms，确保 DOM 布局刷新 (解决文字不更新问题)
+                    await sleep(300);
 
-                // 3. 转 Blob 存储
-                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-                processedBlobs.push({ name: `REDNOTE_${item.file.name}.png`, blob: blob });
+                    // 4. 截图
+                    const canvas = await html2canvas(document.getElementById('render-card'), {
+                        scale: 2, 
+                        useCORS: true,
+                        backgroundColor: null,
+                        logging: false // 关闭日志提升性能
+                    });
 
-                // 4. 完成标记
-                item.status = 'done';
-                document.getElementById(`file-${item.id}`).classList.remove('active');
+                    // 5. 转 Blob
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png', 0.9));
+                    processedBlobs.push({ name: `REDNOTE_${item.file.name}.png`, blob: blob });
+
+                    item.status = 'done';
+                } catch (err) {
+                    console.error(`File ${item.file.name} failed:`, err);
+                    item.status = 'error';
+                }
+                
+                // 更新列表
+                renderFileList();
             }
 
-            renderFileList();
-            btn.innerText = "处理完成";
+            btn.innerText = "🎉 处理完成";
+            btn.disabled = false;
             document.getElementById('dlBatchBtn').disabled = false;
-            alert("🎉 所有图片处理完毕，请点击打包下载！");
         }
 
         // === 下载逻辑 ===
@@ -457,6 +213,13 @@
         }
 
         function downloadBatch() {
+            if(processedBlobs.length === 0) {
+                alert("没有成功处理的图片");
+                return;
+            }
+            const btn = document.getElementById('dlBatchBtn');
+            btn.innerText = "正在打包...";
+            
             const zip = new JSZip();
             const folder = zip.folder("小红书防限流图集");
             processedBlobs.forEach(img => {
@@ -464,8 +227,7 @@
             });
             zip.generateAsync({type:"blob"}).then(content => {
                 saveAs(content, "批量洗图结果.zip");
+                btn.innerText = "📦 打包下载 (ZIP)";
             });
         }
     </script>
-</body>
-</html>
